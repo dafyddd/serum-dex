@@ -115,8 +115,40 @@ impl<'a> Market<'a> {
         rent: Option<Rent>,
         authority: Option<account_parser::SignerAccount>,
     ) -> DexResult<RefMut<'a, OpenOrders>> {
-        self.deref()
-            .load_orders_mut(orders_account, owner_account, program_id, rent, authority)
+        check_assert_eq!(orders_account.owner, program_id)?;
+        let mut open_orders: RefMut<'a, OpenOrders>;
+
+        let open_orders_data_len = orders_account.data_len();
+        let open_orders_lamports = orders_account.lamports();
+        let (_, data) = strip_header::<[u8; 0], u8>(orders_account, true)?;
+        open_orders = RefMut::map(data, |data| from_bytes_mut(data));
+
+        if open_orders.account_flags == 0 {
+            let authority = authority.map(|a| a.inner().key);
+            if authority != self.authority() {
+                return Err(DexErrorCode::InvalidOpenOrdersAuthority.into());
+            }
+
+            let rent = rent.ok_or(DexErrorCode::RentNotProvided)?;
+            let owner_account = owner_account.ok_or(DexErrorCode::OwnerAccountNotProvided)?;
+            if !rent.is_exempt(open_orders_lamports, open_orders_data_len) {
+                return Err(DexErrorCode::OrdersNotRentExempt)?;
+            }
+            open_orders.init(
+                &identity(self.own_address),
+                &owner_account.key.to_aligned_bytes(),
+            )?;
+        }
+
+        open_orders.check_flags()?;
+        check_assert_eq!(identity(open_orders.market), identity(self.own_address))
+            .map_err(|_| DexErrorCode::WrongOrdersAccount)?;
+        if let Some(owner) = owner_account {
+            check_assert_eq!(&identity(open_orders.owner), &owner.key.to_aligned_bytes())
+                .map_err(|_| DexErrorCode::WrongOrdersAccount)?;
+        }
+
+        Ok(open_orders)
     }
 }
 
@@ -332,44 +364,6 @@ impl MarketState {
             Err(DexErrorCode::InvalidMarketFlags)?
         }
         Ok(())
-    }
-
-    pub fn load_orders_mut<'a>(
-        &self,
-        orders_account: &'a AccountInfo,
-        owner_account: Option<&AccountInfo>,
-        program_id: &Pubkey,
-        rent: Option<Rent>,
-        authority: Option<account_parser::SignerAccount>,
-    ) -> DexResult<RefMut<'a, OpenOrders>> {
-        check_assert_eq!(orders_account.owner, program_id)?;
-        let mut open_orders: RefMut<'a, OpenOrders>;
-
-        let open_orders_data_len = orders_account.data_len();
-        let open_orders_lamports = orders_account.lamports();
-        let (_, data) = strip_header::<[u8; 0], u8>(orders_account, true)?;
-        open_orders = RefMut::map(data, |data| from_bytes_mut(data));
-
-        if open_orders.account_flags == 0 {
-            let rent = rent.ok_or(DexErrorCode::RentNotProvided)?;
-            let owner_account = owner_account.ok_or(DexErrorCode::OwnerAccountNotProvided)?;
-            if !rent.is_exempt(open_orders_lamports, open_orders_data_len) {
-                return Err(DexErrorCode::OrdersNotRentExempt)?;
-            }
-            open_orders.init(
-                &identity(self.own_address),
-                &owner_account.key.to_aligned_bytes(),
-            )?;
-        }
-        open_orders.check_flags()?;
-        check_assert_eq!(identity(open_orders.market), identity(self.own_address))
-            .map_err(|_| DexErrorCode::WrongOrdersAccount)?;
-        if let Some(owner) = owner_account {
-            check_assert_eq!(&identity(open_orders.owner), &owner.key.to_aligned_bytes())
-                .map_err(|_| DexErrorCode::WrongOrdersAccount)?;
-        }
-
-        Ok(open_orders)
     }
 
     pub fn load_bids_mut<'a>(&self, bids: &'a AccountInfo) -> DexResult<RefMut<'a, Slab>> {
@@ -2755,10 +2749,11 @@ impl State {
         }
 
         // Drop the open orders account in the event that it is the owner
-        // of itself. `invoke_spl_token` will try to borrow the account
-        // info refcell which would cause an error (as there would be
-        // two borrows while one of them is mutable).
-        drop(open_orders_mut);
+        // of itself, which may happen if the account is a PDA.
+        //
+        // `invoke_spl_token` will try to borrow the account info refcell,
+        // which would cause an error (as there would be two borrows while
+        // one of them is mutable).
         drop(open_orders);
 
         if deposit_amount != 0 {
