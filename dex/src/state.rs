@@ -115,7 +115,8 @@ impl<'a> Market<'a> {
         rent: Option<Rent>,
         authority: Option<account_parser::SignerAccount>,
     ) -> DexResult<RefMut<'a, OpenOrders>> {
-        self._load_orders_mut(orders_account, owner_account, program_id, rent, authority)
+        self.deref()
+            .load_orders_mut(orders_account, owner_account, program_id, rent, authority)
     }
 }
 
@@ -153,7 +154,6 @@ impl MarketStateV2 {
         let state: RefMut<'a, Self>;
 
         account_data = RefMut::map(market_account.try_borrow_mut_data()?, |data| *data);
-        let data_len = account_data.len();
         check_account_padding(&mut account_data)?;
 
         state = RefMut::map(account_data, |data| {
@@ -334,7 +334,7 @@ impl MarketState {
         Ok(())
     }
 
-    pub fn _load_orders_mut<'a>(
+    pub fn load_orders_mut<'a>(
         &self,
         orders_account: &'a AccountInfo,
         owner_account: Option<&AccountInfo>,
@@ -1709,7 +1709,6 @@ pub(crate) mod account_parser {
     }
 
     pub struct NewOrderV3Args<'a, 'b: 'a> {
-        pub program_id: &'a Pubkey,
         pub instruction: &'a NewOrderInstructionV3,
         pub authority_account: Option<SignerAccount<'a, 'b>>,
         pub open_orders: RefMut<'a, OpenOrders>,
@@ -1723,7 +1722,6 @@ pub(crate) mod account_parser {
         pub pc_vault: PcVault<'a, 'b>,
         pub spl_token_program: SplTokenProgram<'a, 'b>,
         pub fee_tier: FeeTier,
-        pub rent: Rent,
     }
     impl<'a, 'b: 'a> NewOrderV3Args<'a, 'b> {
         pub fn with_parsed_args<T>(
@@ -1791,14 +1789,13 @@ pub(crate) mod account_parser {
             let mut bids = market.load_bids_mut(bids_acc).or(check_unreachable!())?;
             let mut asks = market.load_asks_mut(asks_acc).or(check_unreachable!())?;
 
-            let mut open_orders = market.load_orders_mut(
+            let open_orders = market.load_orders_mut(
                 open_orders_acc,
                 Some(owner.inner()),
                 program_id,
                 Some(rent),
                 authority_account,
             )?;
-
             let order_book_state = OrderBookState {
                 bids: bids.deref_mut(),
                 asks: asks.deref_mut(),
@@ -1806,7 +1803,6 @@ pub(crate) mod account_parser {
             };
 
             let args = NewOrderV3Args {
-                program_id,
                 instruction,
                 authority_account,
                 order_book_state,
@@ -1820,7 +1816,6 @@ pub(crate) mod account_parser {
                 pc_vault,
                 spl_token_program,
                 fee_tier,
-                rent,
             };
             f(args)
         }
@@ -1849,7 +1844,7 @@ pub(crate) mod account_parser {
                 &[ref event_q_acc],
                 _unused
             ) = array_refs![accounts, 0; .. ; 1, 1, 2];
-            let mut market = Market::load(market_acc, program_id)?;
+            let market = Market::load(market_acc, program_id)?;
             let event_q = market.load_event_queue_mut(event_q_acc)?;
             let args = ConsumeEventsArgs {
                 limit,
@@ -2017,7 +2012,7 @@ pub(crate) mod account_parser {
                 ref spl_token_program_acc,
             ], remaining_accounts) = array_refs![accounts, 9; ..;];
             let spl_token_program = SplTokenProgram::new(spl_token_program_acc)?;
-            let mut market = Market::load(market_acc, program_id)?;
+            let market = Market::load(market_acc, program_id)?;
             let owner = SignerAccount::new(owner_acc).or(check_unreachable!())?;
 
             let coin_vault =
@@ -2109,7 +2104,7 @@ pub(crate) mod account_parser {
                 ref spl_token_program
             ] = array_ref![accounts, 0, 6];
 
-            let mut market = Market::load(market_acc, program_id)?;
+            let market = Market::load(market_acc, program_id)?;
             let pc_vault = PcVault::from_account(pc_vault_acc, &market)?;
             let fee_receiver = PcWallet::from_account(pc_wallet_acc, &market)?;
             let vault_signer = VaultSigner::new(vault_signer_acc, &market, program_id)?;
@@ -2509,22 +2504,20 @@ impl State {
             market,
             mut event_q,
         } = args;
+
         for _i in 0u16..limit {
             let event = match event_q.peek_front() {
-                None => {
-                    break;
-                }
+                None => break,
                 Some(e) => e,
             };
+
             let view = event.as_view()?;
             let owner: [u64; 4] = event.owner;
-            let pk = Pubkey::new(cast_slice(&identity(owner) as &[_]));
+            let _pk = Pubkey::new(cast_slice(&identity(owner) as &[_]));
             let owner_index: Result<usize, usize> = open_orders_accounts
                 .binary_search_by_key(&owner, |account_info| account_info.key.to_aligned_bytes());
             let mut open_orders: RefMut<OpenOrders> = match owner_index {
-                Err(e) => {
-                    break;
-                }
+                Err(_) => break,
                 Ok(i) => market.load_orders_mut(
                     &open_orders_accounts[i],
                     None,
@@ -2631,7 +2624,6 @@ impl State {
     #[cfg(feature = "program")]
     fn process_new_order_v3(args: account_parser::NewOrderV3Args) -> DexResult {
         let account_parser::NewOrderV3Args {
-            program_id,
             instruction,
             authority_account,
             mut order_book_state,
@@ -2645,7 +2637,6 @@ impl State {
             pc_vault,
             spl_token_program,
             fee_tier,
-            rent,
         } = args;
 
         let open_orders_mut = open_orders.deref_mut();
@@ -2794,9 +2785,9 @@ impl State {
             .map_err(|err| match err {
                 ProgramError::Custom(i) => match TokenError::from_u32(i) {
                     Some(TokenError::InsufficientFunds) => DexErrorCode::InsufficientFunds,
-                    e => DexErrorCode::TransferFailed,
+                    _ => DexErrorCode::TransferFailed,
                 },
-                e => DexErrorCode::TransferFailed,
+                _ => DexErrorCode::TransferFailed,
             })?;
             let balance_after = deposit_vault.balance()?;
             let balance_change = balance_after.checked_sub(balance_before);
