@@ -2186,7 +2186,7 @@ pub(crate) mod account_parser {
             f: impl FnOnce(InitOpenOrdersArgs) -> DexResult<T>,
         ) -> DexResult<T> {
             // Parse accounts.
-            check_assert_eq!(accounts.len(), 4)?;
+            check_assert!(accounts.len() == 4 || accounts.len() == 5)?;
             #[rustfmt::skip]
             let &[
                 ref open_orders_acc,
@@ -2194,6 +2194,11 @@ pub(crate) mod account_parser {
                 ref market_acc,
                 ref rent_acc,
             ] = array_ref![accounts, 0, 4];
+
+            let open_orders_authority = (&accounts[4..])
+                .first()
+                .map(|acc| SignerAccount::new(acc))
+                .transpose()?;
 
             // Validate the accounts given are valid.
             let rent = {
@@ -2209,7 +2214,7 @@ pub(crate) mod account_parser {
                 Some(owner.inner()),
                 program_id,
                 Some(rent),
-                None, // TODO
+                open_orders_authority,
             )?;
 
             // Invoke processor.
