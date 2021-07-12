@@ -1517,7 +1517,7 @@ pub(crate) mod account_parser {
         serum_dex_accounts: &'a [AccountInfo<'b>; 5],
         pub coin_vault_and_mint: TokenAccountAndMint<'a, 'b>,
         pub pc_vault_and_mint: TokenAccountAndMint<'a, 'b>,
-        pub open_orders_authority: Option<SignerAccount<'a, 'b>>,
+        pub market_authority: Option<SignerAccount<'a, 'b>>,
     }
 
     impl<'a, 'b: 'a> InitializeMarketArgs<'a, 'b> {
@@ -1536,7 +1536,7 @@ pub(crate) mod account_parser {
                 remaining_accounts,
             ) = array_refs![accounts, 5, 2, 2, 1; .. ;];
 
-            let open_orders_authority = remaining_accounts
+            let market_authority = remaining_accounts
                 .first()
                 .map(|acc| SignerAccount::new(acc))
                 .transpose()?;
@@ -1596,7 +1596,7 @@ pub(crate) mod account_parser {
                 serum_dex_accounts,
                 coin_vault_and_mint,
                 pc_vault_and_mint,
-                open_orders_authority,
+                market_authority,
             })
         }
 
@@ -2195,7 +2195,7 @@ pub(crate) mod account_parser {
                 ref rent_acc,
             ] = array_ref![accounts, 0, 4];
 
-            let open_orders_authority = (&accounts[4..])
+            let market_authority = (&accounts[4..])
                 .first()
                 .map(|acc| SignerAccount::new(acc))
                 .transpose()?;
@@ -2214,7 +2214,7 @@ pub(crate) mod account_parser {
                 Some(owner.inner()),
                 program_id,
                 Some(rent),
-                open_orders_authority,
+                market_authority,
             )?;
 
             // Invoke processor.
@@ -2850,7 +2850,7 @@ impl State {
         let coin_mint = args.coin_vault_and_mint.get_mint().inner();
         let pc_vault = args.pc_vault_and_mint.get_account().inner();
         let pc_mint = args.pc_vault_and_mint.get_mint().inner();
-        let open_orders_authority = args.open_orders_authority.map(|acc| acc.inner());
+        let market_authority = args.market_authority.map(|acc| acc.inner());
 
         // initialize request queue
         let mut rq_data = req_q.try_borrow_mut_data()?;
@@ -2930,7 +2930,7 @@ impl State {
             fee_rate_bps: fee_rate_bps as u64,
             referrer_rebates_accrued: 0,
         };
-        match open_orders_authority {
+        match market_authority {
             None => {
                 let market_hdr: &mut MarketState =
                     try_from_bytes_mut(cast_slice_mut(market_view)).or(check_unreachable!())?;

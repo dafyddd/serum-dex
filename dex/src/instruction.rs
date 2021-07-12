@@ -443,6 +443,7 @@ pub enum MarketInstruction {
     /// 1. `[signer]` the OpenOrders owner
     /// 2. `[]` market
     /// 3. `[]` the rent sysvar
+    /// 4. `[signer]` market authority (optional).
     InitOpenOrders,
 }
 
