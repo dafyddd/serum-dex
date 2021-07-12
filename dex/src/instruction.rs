@@ -560,11 +560,13 @@ pub fn initialize_market(
     pc_mint_pk: &Pubkey,
     coin_vault_pk: &Pubkey,
     pc_vault_pk: &Pubkey,
+    authority_pk: Option<&Pubkey>,
     // srm_vault_pk: &Pubkey,
     bids_pk: &Pubkey,
     asks_pk: &Pubkey,
     req_q_pk: &Pubkey,
     event_q_pk: &Pubkey,
+    authority: &Pubkey,
     coin_lot_size: u64,
     pc_lot_size: u64,
     vault_signer_nonce: u64,
@@ -594,7 +596,7 @@ pub fn initialize_market(
 
     let rent_sysvar = AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false);
 
-    let accounts = vec![
+    let mut accounts = vec![
         market_account,
         req_q,
         event_q,
@@ -608,6 +610,10 @@ pub fn initialize_market(
         //srm_mint,
         rent_sysvar,
     ];
+    if let Some(auth) = authority_pk {
+        let authority = AccountMeta::new(*auth, false);
+        accounts.push(authority);
+    }
 
     Ok(Instruction {
         program_id: *program_id,
@@ -886,14 +892,18 @@ pub fn init_open_orders(
     open_orders: &Pubkey,
     owner: &Pubkey,
     market: &Pubkey,
+    market_authority: Option<&Pubkey>,
 ) -> Result<Instruction, DexError> {
     let data = MarketInstruction::InitOpenOrders.pack();
-    let accounts: Vec<AccountMeta> = vec![
+    let mut accounts: Vec<AccountMeta> = vec![
         AccountMeta::new(*open_orders, false),
         AccountMeta::new_readonly(*owner, true),
         AccountMeta::new_readonly(*market, false),
         AccountMeta::new_readonly(rent::ID, false),
     ];
+    if let Some(market_authority) = market_authority {
+        accounts.push(AccountMeta::new_readonly(*market_authority, true));
+    }
     Ok(Instruction {
         program_id: *program_id,
         data,
