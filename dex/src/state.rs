@@ -1711,7 +1711,6 @@ pub(crate) mod account_parser {
 
     pub struct NewOrderV3Args<'a, 'b: 'a> {
         pub instruction: &'a NewOrderInstructionV3,
-        pub authority_account: Option<SignerAccount<'a, 'b>>,
         pub open_orders: RefMut<'a, OpenOrders>,
         pub open_orders_address: [u64; 4],
         pub owner: SignerAccount<'a, 'b>,
@@ -1755,13 +1754,9 @@ pub(crate) mod account_parser {
                 ref spl_token_program_acc,
                 ref rent_sysvar_acc,
             ]: &'a [AccountInfo<'b>; MIN_ACCOUNTS] = fixed_accounts;
-            let (srm_or_msrm_account, authority_account) = match remaining_accounts {
-                &[] => (None, None),
-                &[ref account] => (Some(TokenAccount::new(account)?), None),
-                &[ref srm_or_msrm_account, ref authority_account] => (
-                    Some(TokenAccount::new(srm_or_msrm_account)?),
-                    Some(SignerAccount::new(authority_account)),
-                ),
+            let srm_or_msrm_account = match remaining_accounts {
+                &[] => None,
+                &[ref account] => Some(TokenAccount::new(account)?),
                 _ => check_unreachable!()?,
             };
             let mut market = Market::load(market_acc, program_id)?;
@@ -1772,7 +1767,6 @@ pub(crate) mod account_parser {
             let owner = SignerAccount::new(owner_acc)?;
             let fee_tier =
                 market.load_fee_tier(&owner.inner().key.to_aligned_bytes(), srm_or_msrm_account)?;
-            let authority_account = None; // TODO
             let open_orders_address = open_orders_acc.key.to_aligned_bytes();
             let req_q = market.load_request_queue_mut(req_q_acc)?;
             let event_q = market.load_event_queue_mut(event_q_acc)?;
@@ -1795,7 +1789,8 @@ pub(crate) mod account_parser {
                 Some(owner.inner()),
                 program_id,
                 Some(rent),
-                authority_account,
+                None, // To use an open orders authority, explicitly use the
+                      // InitOpenOrders instruction.
             )?;
             let order_book_state = OrderBookState {
                 bids: bids.deref_mut(),
@@ -1805,7 +1800,6 @@ pub(crate) mod account_parser {
 
             let args = NewOrderV3Args {
                 instruction,
-                authority_account,
                 order_book_state,
                 open_orders,
                 open_orders_address,
@@ -2626,7 +2620,6 @@ impl State {
     fn process_new_order_v3(args: account_parser::NewOrderV3Args) -> DexResult {
         let account_parser::NewOrderV3Args {
             instruction,
-            authority_account,
             mut order_book_state,
             mut open_orders,
             open_orders_address,
