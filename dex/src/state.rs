@@ -126,7 +126,7 @@ impl<'a> Market<'a> {
         if open_orders.account_flags == 0 {
             let authority = authority.map(|a| a.inner().key);
             if authority != self.authority() {
-                return Err(DexErrorCode::InvalidOpenOrdersAuthority.into());
+                return Err(DexErrorCode::InvalidMarketAuthority.into());
             }
 
             let rent = rent.ok_or(DexErrorCode::RentNotProvided)?;
