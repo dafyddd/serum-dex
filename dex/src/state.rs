@@ -1736,7 +1736,7 @@ pub(crate) mod account_parser {
                     || accounts.len() == MIN_ACCOUNTS + 1
                     || accounts.len() == MIN_ACCOUNTS + 2
             )?;
-            let (fixed_accounts, remaining_accounts): (
+            let (fixed_accounts, fee_discount_account): (
                 &'a [AccountInfo<'b>; MIN_ACCOUNTS],
                 &'a [AccountInfo<'b>],
             ) = array_refs![accounts, MIN_ACCOUNTS; .. ;];
@@ -1754,7 +1754,7 @@ pub(crate) mod account_parser {
                 ref spl_token_program_acc,
                 ref rent_sysvar_acc,
             ]: &'a [AccountInfo<'b>; MIN_ACCOUNTS] = fixed_accounts;
-            let srm_or_msrm_account = match remaining_accounts {
+            let srm_or_msrm_account = match fee_discount_account {
                 &[] => None,
                 &[ref account] => Some(TokenAccount::new(account)?),
                 _ => check_unreachable!()?,
