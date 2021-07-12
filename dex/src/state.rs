@@ -1517,6 +1517,7 @@ pub(crate) mod account_parser {
         serum_dex_accounts: &'a [AccountInfo<'b>; 5],
         pub coin_vault_and_mint: TokenAccountAndMint<'a, 'b>,
         pub pc_vault_and_mint: TokenAccountAndMint<'a, 'b>,
+        pub open_orders_authority: Option<SignerAccount<'a, 'b>>,
     }
 
     impl<'a, 'b: 'a> InitializeMarketArgs<'a, 'b> {
@@ -1532,8 +1533,13 @@ pub(crate) mod account_parser {
                 unchecked_vaults,
                 unchecked_mints,
                 unchecked_rent,
-                //                authority_maybe, todo
-            ) = array_refs![accounts, 5, 2, 2, 1];
+                remaining_accounts,
+            ) = array_refs![accounts, 5, 2, 2, 1; .. ;];
+
+            let open_orders_authority = remaining_accounts
+                .first()
+                .map(|acc| SignerAccount::new(acc))
+                .transpose()?;
 
             {
                 let rent_sysvar = RentSysvarAccount::new(&unchecked_rent[0])?;
@@ -1590,6 +1596,7 @@ pub(crate) mod account_parser {
                 serum_dex_accounts,
                 coin_vault_and_mint,
                 pc_vault_and_mint,
+                open_orders_authority,
             })
         }
 
@@ -2845,6 +2852,7 @@ impl State {
         let coin_mint = args.coin_vault_and_mint.get_mint().inner();
         let pc_vault = args.pc_vault_and_mint.get_account().inner();
         let pc_mint = args.pc_vault_and_mint.get_mint().inner();
+        let open_orders_authority = args.open_orders_authority.map(|acc| acc.inner());
 
         // initialize request queue
         let mut rq_data = req_q.try_borrow_mut_data()?;
@@ -2898,9 +2906,7 @@ impl State {
         // initialize market
         let mut market_data = market.try_borrow_mut_data()?;
         let market_view = init_account_padding(&mut market_data)?;
-        let market_hdr: &mut MarketState =
-            try_from_bytes_mut(cast_slice_mut(market_view)).or(check_unreachable!())?;
-        *market_hdr = MarketState {
+        let market_state = MarketState {
             coin_lot_size,
             pc_lot_size,
             own_address: market.key.to_aligned_bytes(),
@@ -2926,6 +2932,19 @@ impl State {
             fee_rate_bps: fee_rate_bps as u64,
             referrer_rebates_accrued: 0,
         };
+        match open_orders_authority {
+            None => {
+                let market_hdr: &mut MarketState =
+                    try_from_bytes_mut(cast_slice_mut(market_view)).or(check_unreachable!())?;
+                *market_hdr = market_state;
+            }
+            Some(oo_auth) => {
+                let market_hdr: &mut MarketStateV2 =
+                    try_from_bytes_mut(cast_slice_mut(market_view)).or(check_unreachable!())?;
+                (*market_hdr).inner = market_state;
+                (*market_hdr).authority = *oo_auth.key;
+            }
+        }
         Ok(())
     }
 }
